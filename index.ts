@@ -7,6 +7,16 @@
  */
 
 import * as readline from "readline";
+import { Scene } from "./layers";
+
+/* ============================================================
+ * Command palette
+ * ============================================================
+ */
+
+let commandMode = false;
+let commandBuffer = "";
+
 
 /* ============================================================
  * ANSI
@@ -186,6 +196,54 @@ function draw() {
 	process.stdout.write(ANSI.whiteBg + ANSI.blackFg);
 	process.stdout.write(render(canvas));
 	process.stdout.write(ANSI.reset);
+
+	drawCommandLine();
+}
+
+function drawCommandLine() {
+	if (!commandMode) return;
+
+	const rows = Math.ceil(PIXEL_HEIGHT / 4);
+
+	process.stdout.write(`\x1b[${rows};1H`);
+	process.stdout.write("\x1b[0m");
+	process.stdout.write("\x1b[40m\x1b[37m"); // black bg, white text
+	process.stdout.write(":" + commandBuffer);
+	process.stdout.write("\x1b[K"); // clear rest of line
+}
+
+/* ============================================================
+ * Commands
+ * ============================================================
+ */
+
+function shutdown() {
+	process.stdout.write(ANSI.mouseOff);
+	process.stdout.write(ANSI.reset);
+	process.stdout.write(ANSI.clear);
+	process.stdout.write(ANSI.home);
+	process.exit(0);
+}
+
+/* ============================================================
+ * Command execution
+ * ============================================================
+ */
+
+function executeCommand(cmd: string) {
+	const trimmed = cmd.trim();
+
+	switch (trimmed) {
+		case "q":
+		case "quit":
+		case "exit":
+			shutdown();
+			break;
+
+		default:
+			// unknown command — ignore for now
+			break;
+	}
 }
 
 /* ============================================================
@@ -240,7 +298,50 @@ process.stdin.resume();
 process.stdin.on("data", (buf) => {
 	const s = buf.toString();
 
-	// mouse event
+	/* -------------------------------
+	 * COMMAND MODE
+	 * ------------------------------- */
+	if (commandMode) {
+		if (s === "\r") {
+			executeCommand(commandBuffer);
+			commandBuffer = "";
+			commandMode = false;
+			draw();
+			return;
+		}
+
+		if (s === "\x1b") {
+			commandMode = false;
+			commandBuffer = "";
+			draw();
+			return;
+		}
+
+		if (s === "\x7f") {
+			commandBuffer = commandBuffer.slice(0, -1);
+			draw();
+			return;
+		}
+
+		commandBuffer += s;
+		draw();
+		return;
+	}
+
+	/* -------------------------------
+	 * ENTER COMMAND MODE
+	 * ------------------------------- */
+	if (s === ":") {
+		commandMode = true;
+		commandBuffer = "";
+		draw();
+		return;
+	}
+
+	/* -------------------------------
+	 * MOUSE EVENTS
+	 * ------------------------------- */
+
 	const match = s.match(/\x1b\[<(\d+);(\d+);(\d+)([mM])/);
 	if (!match) return;
 
