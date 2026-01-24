@@ -21,7 +21,7 @@ const scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
 const rl = readline.createInterface({
 	input: process.stdin,
 	output: process.stdout,
-	prompt: ":",
+	prompt: "$ ",
 });
 
 // ---- initial scene ----
