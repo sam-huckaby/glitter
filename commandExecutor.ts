@@ -33,16 +33,17 @@ export function execute(
 		case "add":
 			if (cmd.args[0]?.value === "box") {
 				const n = cmd.namedArgs;
-				scene.drawBox(
-					asNumber(n.x, "x"),
-					asNumber(n.y, "y"),
-					asNumber(n.w, "w"),
-					asNumber(n.h, "h")
-				);
+				scene.addBox({
+					rect: {
+						x: asNumber(n.x, "x"),
+						y: asNumber(n.y, "y"),
+						w: asNumber(n.w, "w"),
+						h: asNumber(n.h, "h"),
+					},
+				});
 				return { type: "render" };
 			}
 	}
 
 	return { type: "none" };
 }
-
