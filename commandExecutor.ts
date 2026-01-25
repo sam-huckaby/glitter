@@ -1,16 +1,46 @@
 import { Scene } from "./layers";
-import { CommandAST } from "./ast";
+import { CommandAST, IncompleteCommand } from "./ast";
 import { asString, asNumber } from "./valueUtils";
 
 export type ExecResult =
 	| { type: "render" }
 	| { type: "quit" }
+	| { type: "needsInteraction"; pendingAction: PendingAction }
 	| { type: "none" };
+
+export type PendingAction = {
+	kind: "createBoxDrag";
+	layerId: string;
+	startedAt?: { px: number; py: number };
+	previewRect?: { x: number; y: number; w: number; h: number };
+	constraints?: { withinFrame: boolean; minW: number; minH: number };
+	cancelKey?: "Escape";
+};
 
 export function execute(
 	scene: Scene,
-	cmd: CommandAST
+	cmd: CommandAST | IncompleteCommand
 ): ExecResult {
+	if (cmd.type === "incomplete") {
+		if (cmd.name === "add" && cmd.args[0]?.value === "box") {
+			const layerId = scene.activeLayerId;
+			if (!layerId) throw new Error("No active layer");
+			return {
+				type: "needsInteraction",
+				pendingAction: {
+					kind: "createBoxDrag",
+					layerId,
+					constraints: {
+						withinFrame: true,
+						minW: 80,
+						minH: 40,
+					},
+					cancelKey: "Escape",
+				},
+			};
+		}
+	}
+
 	switch (cmd.name) {
 		case "q":
 		case "quit":

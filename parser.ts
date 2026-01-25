@@ -1,10 +1,10 @@
 import { Token } from "./tokenizer";
-import { CommandAST, Value } from "./ast";
+import { CommandAST, ParsedCommand, Value } from "./ast";
 
 export function parseCommand(
 	tokens: Token[],
 	raw: string
-): CommandAST {
+): ParsedCommand {
 	let i = 0;
 
 	function peek() {
@@ -66,6 +66,21 @@ export function parseCommand(
 		throw new Error(`Unexpected token`);
 	}
 
+	if (
+		name === "add" &&
+		args[0]?.value === "box" &&
+		Object.keys(namedArgs).length === 0
+	) {
+		return {
+			type: "incomplete",
+			name,
+			args,
+			namedArgs,
+			raw,
+			reason: "missingRect",
+		};
+	}
+
 	return {
 		type: "command",
 		name,
@@ -95,4 +110,3 @@ function tokenToValue(token: Token): Value {
 		value: token.value!,
 	};
 }
-

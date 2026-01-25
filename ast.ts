@@ -11,3 +11,13 @@ export interface CommandAST {
 	raw: string;
 }
 
+export interface IncompleteCommand {
+	type: "incomplete";
+	name: string;
+	args: Value[];
+	namedArgs: Record<string, Value>;
+	raw: string;
+	reason: "missingRect";
+}
+
+export type ParsedCommand = CommandAST | IncompleteCommand;

@@ -1,8 +1,8 @@
 import * as readline from "readline";
 import { tokenize } from "./tokenizer";
 import { parseCommand } from "./parser";
-import { execute } from "./commandExecutor";
-import { Scene } from "./layers";
+import { execute, PendingAction } from "./commandExecutor";
+import { OverlayRect, Scene } from "./layers";
 import { PixelCanvas } from "./PixelCanvas";
 import { createMouseInput, MouseEvent } from "./mouseInput";
 
@@ -13,6 +13,10 @@ const TERM_WIDTH = Math.max(process.stdout.columns || 80, 40); // minimum 40 cha
 // Reserve last line for command prompt
 const DESIGN_HEIGHT = TERM_HEIGHT - 2; // leave 1 line + 1 padding
 const COMMAND_ROW = TERM_HEIGHT - 1; // position at bottom
+const LAYER_COLOR = "\x1b[38;5;208m";
+const COLOR_RESET = "\x1b[0m";
+let errorMessage: string | null = null;
+let pendingAction: PendingAction | null = null;
 
 const canvas = new PixelCanvas();
 const scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
@@ -26,6 +30,34 @@ const rl = readline.createInterface({
 	input: mouse.input,
 	output: process.stdout,
 	prompt: "$ ",
+});
+
+readline.emitKeypressEvents(mouse.input);
+if (mouse.input.setRawMode) {
+	mouse.input.setRawMode(true);
+}
+
+mouse.input.on("keypress", (str, key) => {
+	if (pendingAction && key?.name === "escape") {
+		pendingAction = null;
+		render();
+		return;
+	}
+	if (errorMessage && shouldClearError(str, key)) {
+		errorMessage = null;
+		render();
+		return;
+	}
+	if (!key?.ctrl) return;
+	if (key.name === "n") {
+		scene.cycleActiveLayer(-1);
+		render();
+		return;
+	}
+	if (key.name === "p") {
+		scene.cycleActiveLayer(1);
+		render();
+	}
 });
 
 // ---- initial scene ----
@@ -50,11 +82,33 @@ scene.addLayer("components");
 // ---- rendering ----
 
 function render() {
-	canvas.draw(scene.render());
+	const overlay: OverlayRect | undefined = pendingAction?.previewRect
+		? { rect: pendingAction.previewRect }
+		: undefined;
+	canvas.draw(scene.render(overlay));
 
 	// move cursor to command row
 	process.stdout.write(`\x1b[${COMMAND_ROW};1H`);
 	process.stdout.write("\x1b[0K");
+
+	if (errorMessage) {
+		process.stdout.write("\x1b[41m"); // red bg
+		process.stdout.write(
+			errorMessage.slice(0, process.stdout.columns)
+		);
+		process.stdout.write("\x1b[0m");
+		return;
+	}
+
+	const activeLayer = scene.layers.find(l => l.id === scene.activeLayerId);
+	const layerName = activeLayer?.name ?? "none";
+	if (pendingAction) {
+		rl.setPrompt(
+			`${LAYER_COLOR}[${layerName}]${COLOR_RESET} $ :add box (drag to place, Esc to cancel)`
+		);
+	} else {
+		rl.setPrompt(`${LAYER_COLOR}[${layerName}]${COLOR_RESET} $ `);
+	}
 
 	rl.prompt(true);
 }
@@ -83,6 +137,10 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 		x: (ev.xCell - 1) * 2,
 		y: (ev.yCell - 1) * 4,
 	};
+
+	if (pendingAction) {
+		if (handlePendingAction(ev, mousePx)) return;
+	}
 
 	if (ev.kind === "down") {
 		if (ev.button !== 0) return;
@@ -133,12 +191,11 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 // ---- input handling ----
 
 rl.on("line", line => {
+	if (pendingAction) {
+		pendingAction = null;
+	}
 	try {
-		const tokens = tokenize(line);
-		const ast = parseCommand(tokens, line);
-		const result = execute(scene, ast);
-
-		if (result.type === "quit") shutdown();
+		runCommandLine(line);
 	} catch (err) {
 		showError(String(err));
 	}
@@ -146,15 +203,22 @@ rl.on("line", line => {
 	render();
 });
 
+function runCommandLine(line: string) {
+	const tokens = tokenize(line);
+	const ast = parseCommand(tokens, line);
+	const result = execute(scene, ast);
+
+	if (result.type === "needsInteraction") {
+		pendingAction = result.pendingAction;
+	}
+
+	if (result.type === "quit") shutdown();
+}
+
 // ---- error display ----
 
 function showError(msg: string) {
-	process.stdout.write(`\x1b[${COMMAND_ROW};1H`);
-	process.stdout.write("\x1b[41m"); // red bg
-	process.stdout.write(
-		msg.slice(0, process.stdout.columns)
-	);
-	process.stdout.write("\x1b[0m");
+	errorMessage = msg;
 }
 
 // ---- shutdown ----
@@ -163,6 +227,9 @@ function shutdown() {
 	mouse.disable();
 	mouse.dispose();
 	canvas.destroy();
+	if (mouse.input.setRawMode) {
+		mouse.input.setRawMode(false);
+	}
 	rl.close();
 	process.exit(0);
 }
@@ -183,6 +250,7 @@ function hitTestTopmostBoxEdge(
 		const comp = scene.doc.components[i];
 		if (comp.type !== "box") continue;
 		if (comp.meta?.locked) continue;
+		if (comp.layerId !== scene.activeLayerId) continue;
 
 		const edge = hitTestBoxEdge(comp.rect, px, py, threshold);
 		if (!edge) continue;
@@ -276,4 +344,152 @@ function resizeRect(
 
 function clamp(n: number, min: number, max: number): number {
 	return Math.max(min, Math.min(max, n));
+}
+
+function shouldClearError(
+	str: string,
+	key?: { ctrl?: boolean; meta?: boolean; alt?: boolean; name?: string }
+): boolean {
+	if (key?.ctrl || key?.meta || key?.alt) return false;
+	if (key?.name === "backspace" || key?.name === "delete") return true;
+	return str.length === 1 && /[ -~]/.test(str);
+}
+
+function handlePendingAction(
+	ev: MouseEvent,
+	mousePx: { x: number; y: number }
+): boolean {
+	if (!pendingAction) return false;
+	if (pendingAction.kind !== "createBoxDrag") return false;
+	const constraints = pendingAction.constraints ?? {
+		withinFrame: true,
+		minW: 80,
+		minH: 40,
+	};
+
+	if (ev.kind === "down") {
+		if (ev.button !== 0) return true;
+		if (!isPointInCanvas(mousePx)) return true;
+		pendingAction.startedAt = { px: mousePx.x, py: mousePx.y };
+		pendingAction.previewRect = {
+			x: mousePx.x,
+			y: mousePx.y,
+			w: 1,
+			h: 1,
+		};
+		render();
+		return true;
+	}
+
+	if (!pendingAction.startedAt) return true;
+
+	if (ev.kind === "move") {
+		const rect = clampRectToCanvas(
+			normalizeRect(pendingAction.startedAt, mousePx)
+		);
+		pendingAction.previewRect = rect;
+		render();
+		return true;
+	}
+
+	if (ev.kind === "up") {
+		const rect = finalizeCreateRect(
+			pendingAction.startedAt,
+			mousePx,
+			constraints.minW,
+			constraints.minH
+		);
+		const command = `:add box x=${rect.x} y=${rect.y} w=${rect.w} h=${rect.h}`;
+		pendingAction = null;
+		try {
+			runCommandLine(command);
+		} catch (err) {
+			showError(String(err));
+		}
+		render();
+		return true;
+	}
+
+	return true;
+}
+
+function normalizeRect(
+	start: { px: number; py: number },
+	end: { x: number; y: number }
+): { x: number; y: number; w: number; h: number } {
+	const x = Math.min(start.px, end.x);
+	const y = Math.min(start.py, end.y);
+	const w = Math.abs(end.x - start.px) + 1;
+	const h = Math.abs(end.y - start.py) + 1;
+	return { x, y, w, h };
+}
+
+function clampRectToCanvas(rect: { x: number; y: number; w: number; h: number }) {
+	let { x, y, w, h } = rect;
+
+	if (x < 0) {
+		w -= -x;
+		x = 0;
+	}
+	if (y < 0) {
+		h -= -y;
+		y = 0;
+	}
+	if (x + w > scene.widthPx) {
+		w = scene.widthPx - x;
+	}
+	if (y + h > scene.heightPx) {
+		h = scene.heightPx - y;
+	}
+
+	w = Math.max(1, w);
+	h = Math.max(1, h);
+	return { x, y, w, h };
+}
+
+function finalizeCreateRect(
+	start: { px: number; py: number },
+	end: { x: number; y: number },
+	minW: number,
+	minH: number
+): { x: number; y: number; w: number; h: number } {
+	const isClick = start.px === end.x && start.py === end.y;
+	if (isClick) {
+		return clampRectToCanvas({ x: start.px, y: start.py, w: minW, h: minH });
+	}
+
+	let rect = clampRectToCanvas(normalizeRect(start, end));
+	if (rect.w < minW || rect.h < minH) {
+		rect = enforceMinSize(rect, minW, minH);
+	}
+	return rect;
+}
+
+function enforceMinSize(
+	rect: { x: number; y: number; w: number; h: number },
+	minW: number,
+	minH: number
+): { x: number; y: number; w: number; h: number } {
+	let w = Math.max(rect.w, minW);
+	let h = Math.max(rect.h, minH);
+	let x = rect.x;
+	let y = rect.y;
+
+	if (x + w > scene.widthPx) {
+		x = Math.max(0, scene.widthPx - w);
+	}
+	if (y + h > scene.heightPx) {
+		y = Math.max(0, scene.heightPx - h);
+	}
+
+	return clampRectToCanvas({ x, y, w, h });
+}
+
+function isPointInCanvas(point: { x: number; y: number }): boolean {
+	return (
+		point.x >= 0 &&
+		point.y >= 0 &&
+		point.x < scene.widthPx &&
+		point.y < scene.heightPx
+	);
 }

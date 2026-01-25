@@ -141,6 +141,22 @@ export class Scene {
 			throw new Error(`Layer "${layerId}" not found`);
 		}
 
+		const { x, y, w, h } = opts.rect;
+		const maxX = x + w;
+		const maxY = y + h;
+		if (
+			x < 0 ||
+			y < 0 ||
+			w < 1 ||
+			h < 1 ||
+			maxX > this.widthPx ||
+			maxY > this.heightPx
+		) {
+			throw new Error(
+				`cannot create box outside of the canvas. Canvas height: ${this.heightPx}, canvas width: ${this.widthPx}`
+			);
+		}
+
 		const id = opts.id ?? this.nextComponentId();
 		if (this.doc.components.some(c => c.id === id)) {
 			throw new Error(`Component "${id}" already exists`);
@@ -217,7 +233,14 @@ export class Scene {
 	// Rendering
 	// ─────────────────────────
 
-	render(): string {
+	render(overlay?: OverlayRect): string {
+		const activeLayerId = this.activeLayerId;
+		const colorActive = "\x1b[38;5;208m";
+		const colorOverlay = overlay?.color ?? "\x1b[38;5;245m";
+		const colorReset = "\x1b[0m";
+		let colorOn = false;
+		let overlayOn = false;
+
 		// clear runtime buffers
 		for (const layer of this.layers) {
 			layer.buffer.fill(0);
@@ -244,6 +267,14 @@ export class Scene {
 		const final = new Uint8Array(
 			this.widthCells * this.heightCells
 		);
+		const activeMask = new Uint8Array(final.length);
+		const overlayBuffer = overlay
+			? new Uint8Array(final.length)
+			: null;
+
+		if (overlayBuffer && overlay?.rect) {
+			drawDashedRect(overlayBuffer, this.widthCells, this.heightCells, overlay.rect);
+		}
 
 		// composite in doc order
 		for (const layerDoc of this.doc.layers) {
@@ -255,16 +286,115 @@ export class Scene {
 			}
 		}
 
+		const activeLayer = this.layers.find(l => l.id === activeLayerId);
+		if (activeLayer?.visible) {
+			for (let i = 0; i < final.length; i++) {
+				if (activeLayer.buffer[i] !== 0) activeMask[i] = 1;
+			}
+		}
+
 		let out = "";
 		for (let y = 0; y < this.heightCells; y++) {
 			for (let x = 0; x < this.widthCells; x++) {
-				out += String.fromCharCode(
-					0x2800 + final[y * this.widthCells + x]
-				);
+				const index = y * this.widthCells + x;
+				const isActive = activeMask[index] === 1;
+				const overlayValue = overlayBuffer ? overlayBuffer[index] : 0;
+				const useOverlay = overlayValue !== 0;
+				const cellValue = final[index] | overlayValue;
+
+				if (useOverlay) {
+					if (!overlayOn) {
+						out += colorOverlay;
+						overlayOn = true;
+						colorOn = false;
+					}
+				} else {
+					if (overlayOn) {
+						out += colorReset;
+						overlayOn = false;
+					}
+					if (isActive && !colorOn) {
+						out += colorActive;
+						colorOn = true;
+					}
+					if (!isActive && colorOn) {
+						out += colorReset;
+						colorOn = false;
+					}
+				}
+
+				out += String.fromCharCode(0x2800 + cellValue);
+			}
+			if (overlayOn || colorOn) {
+				out += colorReset;
+				colorOn = false;
+				overlayOn = false;
 			}
 			out += "\n";
 		}
 
 		return out;
 	}
+
+	cycleActiveLayer(direction: 1 | -1): void {
+		const layers = this.doc.layers;
+		if (layers.length === 0) return;
+		const currentIndex = layers.findIndex(l => l.id === this.activeLayerId);
+		const baseIndex = currentIndex === -1 ? 0 : currentIndex;
+		const nextIndex = (baseIndex + direction + layers.length) % layers.length;
+		this.activeLayerId = layers[nextIndex].id;
+	}
+}
+
+export type OverlayRect = {
+	rect: Rect;
+	color?: string;
+};
+
+function drawDashedRect(
+	buffer: Uint8Array,
+	widthCells: number,
+	heightCells: number,
+	rect: Rect
+): void {
+	const maxX = widthCells * 2 - 1;
+	const maxY = heightCells * 4 - 1;
+	const xStart = clamp(rect.x, 0, maxX);
+	const yStart = clamp(rect.y, 0, maxY);
+	const xEnd = clamp(rect.x + rect.w - 1, 0, maxX);
+	const yEnd = clamp(rect.y + rect.h - 1, 0, maxY);
+	const step = 2;
+
+	for (let x = xStart; x <= xEnd; x += step) {
+		setPixelInBuffer(buffer, widthCells, heightCells, x, yStart);
+		setPixelInBuffer(buffer, widthCells, heightCells, x, yEnd);
+	}
+
+	for (let y = yStart; y <= yEnd; y += step) {
+		setPixelInBuffer(buffer, widthCells, heightCells, xStart, y);
+		setPixelInBuffer(buffer, widthCells, heightCells, xEnd, y);
+	}
+}
+
+function setPixelInBuffer(
+	buffer: Uint8Array,
+	widthCells: number,
+	heightCells: number,
+	x: number,
+	y: number
+): void {
+	const cellX = Math.floor(x / 2);
+	const cellY = Math.floor(y / 4);
+	if (cellX < 0 || cellY < 0 || cellX >= widthCells || cellY >= heightCells) {
+		return;
+	}
+	const dotX = x % 2;
+	const dotY = y % 4;
+	const mask = BRAILLE_DOTS[dotY][dotX];
+	const index = cellY * widthCells + cellX;
+	buffer[index] |= mask;
+}
+
+function clamp(n: number, min: number, max: number): number {
+	return Math.max(min, Math.min(max, n));
 }
