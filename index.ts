@@ -17,6 +17,9 @@ const LAYER_COLOR = "\x1b[38;5;208m";
 const COLOR_RESET = "\x1b[0m";
 let errorMessage: string | null = null;
 let pendingAction: PendingAction | null = null;
+const commandHistory: string[] = [];
+let historyIndex = 0;
+let historyDraft: string | null = null;
 
 const canvas = new PixelCanvas();
 const scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
@@ -48,7 +51,19 @@ mouse.input.on("keypress", (str, key) => {
 		render();
 		return;
 	}
+	if (key?.name === "up" && !key?.ctrl) {
+		stepCommandHistory(-1);
+		return;
+	}
+	if (key?.name === "down" && !key?.ctrl) {
+		stepCommandHistory(1);
+		return;
+	}
+
+	// All keys beyond this point are paired with the CTRL key
 	if (!key?.ctrl) return;
+	// BUG: I think the last active command is getting included in the buffer that is rendered for the layer
+	// It appears that when I rotate through the layers, I see the last command run in that layer, which is bad
 	if (key.name === "n") {
 		scene.cycleActiveLayer(-1);
 		render();
@@ -195,6 +210,7 @@ rl.on("line", line => {
 		pendingAction = null;
 	}
 	try {
+		recordCommandHistory(line);
 		runCommandLine(line);
 	} catch (err) {
 		showError(String(err));
@@ -353,6 +369,41 @@ function shouldClearError(
 	if (key?.ctrl || key?.meta || key?.alt) return false;
 	if (key?.name === "backspace" || key?.name === "delete") return true;
 	return str.length === 1 && /[ -~]/.test(str);
+}
+
+function recordCommandHistory(line: string) {
+	if (line.trim().length > 0) {
+		commandHistory.push(line);
+	}
+	historyIndex = commandHistory.length;
+	historyDraft = null;
+}
+
+function stepCommandHistory(delta: -1 | 1) {
+	if (!commandHistory.length) return;
+	if (historyIndex === commandHistory.length) {
+		historyDraft = rl.line;
+	}
+
+	const nextIndex = clamp(
+		historyIndex + delta,
+		0,
+		commandHistory.length
+	);
+	if (nextIndex === historyIndex) return;
+	if (nextIndex === commandHistory.length) {
+		historyIndex = nextIndex;
+		replacePromptInput(historyDraft ?? "");
+		return;
+	}
+
+	historyIndex = nextIndex;
+	replacePromptInput(commandHistory[historyIndex]);
+}
+
+function replacePromptInput(text: string) {
+	rl.write(null, { ctrl: true, name: "u" });
+	rl.write(text);
 }
 
 function handlePendingAction(
