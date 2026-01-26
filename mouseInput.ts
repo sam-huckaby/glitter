@@ -2,8 +2,20 @@ import { EventEmitter } from "events";
 import { PassThrough } from "stream";
 
 export type MouseEvent = {
+	/**
+	 * Kind of mouse event:
+	 * - down: clicked a button down
+	 * - up: released a button that was down
+	 * - move: mouse changed position
+	 */
 	kind: "down" | "up" | "move";
+	/**
+	* The horizontal position in the terminal window
+	*/
 	xCell: number;
+	/**
+	* The vertical position in the terminal window
+	*/
 	yCell: number;
 	button: number;
 	shift: boolean;

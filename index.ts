@@ -10,7 +10,10 @@ import { createMouseInput, MouseEvent } from "./mouseInput";
 const TERM_HEIGHT = Math.max(process.stdout.rows || 24, 10); // minimum 10 lines
 const TERM_WIDTH = Math.max(process.stdout.columns || 80, 40); // minimum 40 chars
 
-// Reserve last line for command prompt
+/**
+ * Height of the area that the user can draw on.
+ * Leaves the bottom row for command input
+ */
 const DESIGN_HEIGHT = TERM_HEIGHT - 2; // leave 1 line + 1 padding
 const COMMAND_ROW = TERM_HEIGHT - 1; // position at bottom
 const LAYER_COLOR = "\x1b[38;5;208m";
@@ -145,18 +148,24 @@ const MIN_H_PX = 2;
 let drag: DragState | null = null;
 
 mouse.events.on("mouse", (ev: MouseEvent) => {
+	// Break out if the even takes places somewhere I don't care about
 	if (ev.yCell > DESIGN_HEIGHT) return;
 	if (ev.xCell < 1 || ev.yCell < 1) return;
 
+	// Create an object to store the mouse position at the "pixel" level (in the braille dots)
 	const mousePx = {
 		x: (ev.xCell - 1) * 2,
 		y: (ev.yCell - 1) * 4,
 	};
 
+	// A pendingAction is when a command that needs arguments has been issued without them
+	// This allows a mouse input to provide the remaining pieces of information, such as
+	// the beginning x/y and the height/width.
 	if (pendingAction) {
 		if (handlePendingAction(ev, mousePx)) return;
 	}
 
+	// Handle mouse down events
 	if (ev.kind === "down") {
 		if (ev.button !== 0) return;
 
