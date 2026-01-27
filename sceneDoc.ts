@@ -10,6 +10,7 @@ export type SceneDoc = {
 	state: {
 		nextId: number;
 	};
+	meta?: Record<string, unknown>;
 };
 
 export type LayerDoc = {
@@ -36,6 +37,7 @@ export type BoxComponentDoc = {
 	meta?: {
 		name?: string;
 		locked?: boolean;
+		[key: string]: unknown;
 	};
 };
 

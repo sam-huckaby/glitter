@@ -1,10 +1,13 @@
 import { Scene } from "./layers";
 import { CommandAST, IncompleteCommand } from "./ast";
-import { asString, asNumber } from "./valueUtils";
+import { asNumber, asString } from "./valueUtils";
 
 export type ExecResult =
 	| { type: "render" }
 	| { type: "quit" }
+	| { type: "save"; filename: string }
+	| { type: "load"; filename: string }
+	| { type: "info"; message: string }
 	| { type: "needsInteraction"; pendingAction: PendingAction }
 	| { type: "none" };
 
@@ -42,6 +45,25 @@ export function execute(
 	}
 
 	switch (cmd.name) {
+		case "help": {
+			return {
+				type: "info",
+				message:
+					"Commands: :w [filename] save (default scene.json), :e [filename] load, :q quit",
+			};
+		}
+		case "w": {
+			const filename = cmd.args.length > 0
+				? asString(cmd.args[0], "filename")
+				: "scene.json";
+			return { type: "save", filename };
+		}
+
+		case "e": {
+			const filename = asString(cmd.args[0], "filename");
+			return { type: "load", filename };
+		}
+
 		case "q":
 		case "quit":
 			return { type: "quit" };

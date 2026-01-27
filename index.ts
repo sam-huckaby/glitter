@@ -1,10 +1,12 @@
 import * as readline from "readline";
+import * as fs from "fs";
 import { tokenize } from "./tokenizer";
 import { parseCommand } from "./parser";
 import { execute, PendingAction } from "./commandExecutor";
 import { OverlayRect, Scene } from "./layers";
 import { PixelCanvas } from "./PixelCanvas";
 import { createMouseInput, MouseEvent } from "./mouseInput";
+import { compactFromSceneDoc, sceneDocFromCompact } from "./compactDoc";
 
 // Get terminal dimensions with fallback
 const TERM_HEIGHT = Math.max(process.stdout.rows || 24, 10); // minimum 10 lines
@@ -19,13 +21,15 @@ const COMMAND_ROW = TERM_HEIGHT - 1; // position at bottom
 const LAYER_COLOR = "\x1b[38;5;208m";
 const COLOR_RESET = "\x1b[0m";
 let errorMessage: string | null = null;
+let warningMessage: string | null = null;
+let infoMessage: string | null = null;
 let pendingAction: PendingAction | null = null;
 const commandHistory: string[] = [];
 let historyIndex = 0;
 let historyDraft: string | null = null;
 
 const canvas = new PixelCanvas();
-const scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
+let scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
 
 const mouse = createMouseInput();
 
@@ -51,6 +55,16 @@ mouse.input.on("keypress", (str, key) => {
 	}
 	if (errorMessage && shouldClearError(str, key)) {
 		errorMessage = null;
+		render();
+		return;
+	}
+	if (warningMessage && shouldClearError(str, key)) {
+		warningMessage = null;
+		render();
+		return;
+	}
+	if (infoMessage && shouldClearError(str, key)) {
+		infoMessage = null;
 		render();
 		return;
 	}
@@ -113,6 +127,22 @@ function render() {
 		process.stdout.write("\x1b[41m"); // red bg
 		process.stdout.write(
 			errorMessage.slice(0, process.stdout.columns)
+		);
+		process.stdout.write("\x1b[0m");
+		return;
+	}
+	if (warningMessage) {
+		process.stdout.write("\x1b[43m\x1b[30m"); // yellow bg + black text
+		process.stdout.write(
+			warningMessage.slice(0, process.stdout.columns)
+		);
+		process.stdout.write("\x1b[0m");
+		return;
+	}
+	if (infoMessage) {
+		process.stdout.write("\x1b[42m\x1b[30m"); // green bg + black text
+		process.stdout.write(
+			infoMessage.slice(0, process.stdout.columns)
 		);
 		process.stdout.write("\x1b[0m");
 		return;
@@ -233,6 +263,22 @@ function runCommandLine(line: string) {
 	const ast = parseCommand(tokens, line);
 	const result = execute(scene, ast);
 
+	if (result.type === "save") {
+		saveCompactDoc(result.filename);
+		return;
+	}
+
+	if (result.type === "load") {
+		loadCompactDoc(result.filename);
+		return;
+	}
+
+	if (result.type === "info") {
+		warningMessage = null;
+		infoMessage = result.message;
+		return;
+	}
+
 	if (result.type === "needsInteraction") {
 		pendingAction = result.pendingAction;
 	}
@@ -240,10 +286,40 @@ function runCommandLine(line: string) {
 	if (result.type === "quit") shutdown();
 }
 
+function saveCompactDoc(filename: string) {
+	const compact = compactFromSceneDoc(scene.toDoc());
+	fs.writeFileSync(filename, JSON.stringify(compact, null, 2), "utf8");
+	warningMessage = null;
+	infoMessage = `Saved ${filename}`;
+}
+
+function loadCompactDoc(filename: string) {
+	const raw = fs.readFileSync(filename, "utf8");
+	const parsed = JSON.parse(raw);
+	const { doc, warnings } = sceneDocFromCompact(parsed);
+	scene = Scene.fromDoc(doc);
+	pendingAction = null;
+	drag = null;
+	if (warnings.length > 0) {
+		warningMessage = formatWarnings(warnings);
+		infoMessage = null;
+		return;
+	}
+	warningMessage = null;
+	infoMessage = `Loaded ${filename}`;
+}
+
 // ---- error display ----
 
 function showError(msg: string) {
 	errorMessage = msg;
+}
+
+function formatWarnings(
+	warnings: { nodeType: string; nodeId: string }[]
+): string {
+	const labels = warnings.map(w => `${w.nodeType}:${w.nodeId}`);
+	return `Warning: skipped unsupported nodes (${labels.join(", ")})`;
 }
 
 // ---- shutdown ----

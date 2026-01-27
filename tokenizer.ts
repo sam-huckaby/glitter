@@ -16,10 +16,10 @@ export function tokenize(input: string): Token[] {
 	const tokens: Token[] = [];
 	let i = 0;
 
-	const isAlpha = (c: string) =>
-		/[a-zA-Z_]/.test(c);
-	const isAlnum = (c: string) =>
-		/[a-zA-Z0-9_-]/.test(c);
+	const isIdentStart = (c: string) =>
+		/[a-zA-Z_./]/.test(c);
+	const isIdentChar = (c: string) =>
+		/[a-zA-Z0-9_./-]/.test(c);
 	const isDigit = (c: string) =>
 		/[0-9]/.test(c);
 
@@ -73,9 +73,9 @@ export function tokenize(input: string): Token[] {
 			continue;
 		}
 
-		if (isAlpha(c)) {
+		if (isIdentStart(c)) {
 			let ident = "";
-			while (i < input.length && isAlnum(input[i])) {
+			while (i < input.length && isIdentChar(input[i])) {
 				ident += input[i++];
 			}
 
@@ -93,4 +93,3 @@ export function tokenize(input: string): Token[] {
 	tokens.push({ type: "eof", pos: i });
 	return tokens;
 }
-
