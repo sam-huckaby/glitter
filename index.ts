@@ -154,8 +154,8 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 
 	// Create an object to store the mouse position at the "pixel" level (in the braille dots)
 	const mousePx = {
-		x: (ev.xCell - 1) * 2,
-		y: (ev.yCell - 1) * 4,
+		x: (ev.xCell - 1) * 2 + 1,
+		y: (ev.yCell - 1) * 4 + 2,
 	};
 
 	// A pendingAction is when a command that needs arguments has been issued without them
