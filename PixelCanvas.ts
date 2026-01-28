@@ -6,6 +6,7 @@ export class PixelCanvas {
 
 	destroy() {
 		// restore cursor
+		process.stdout.write("\x1b[H\x1b[2J");
 		process.stdout.write("\x1b[?25h");
 		process.stdout.write("\x1b[0m");
 	}
@@ -18,4 +19,3 @@ export class PixelCanvas {
 		process.stdout.write(buffer);
 	}
 }
-

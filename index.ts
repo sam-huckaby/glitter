@@ -2,11 +2,13 @@ import * as readline from "readline";
 import * as fs from "fs";
 import { tokenize } from "./tokenizer";
 import { parseCommand } from "./parser";
-import { execute, PendingAction } from "./commandExecutor";
+import { execute, ExecResult, PendingAction } from "./commandExecutor";
 import { OverlayRect, Scene } from "./layers";
 import { PixelCanvas } from "./PixelCanvas";
 import { createMouseInput, MouseEvent } from "./mouseInput";
 import { compactFromSceneDoc, sceneDocFromCompact } from "./compactDoc";
+import { CommandAST } from "./ast";
+import { SceneDoc } from "./sceneDoc";
 
 // Get terminal dimensions with fallback
 const TERM_HEIGHT = Math.max(process.stdout.rows || 24, 10); // minimum 10 lines
@@ -27,6 +29,13 @@ let pendingAction: PendingAction | null = null;
 const commandHistory: string[] = [];
 let historyIndex = 0;
 let historyDraft: string | null = null;
+type UndoEntry = {
+	command: CommandAST;
+	doc: SceneDoc;
+	activeLayerId: string | null;
+};
+const commandStack: CommandAST[] = [];
+const undoStack: UndoEntry[] = [];
 
 const canvas = new PixelCanvas();
 let scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
@@ -77,18 +86,27 @@ mouse.input.on("keypress", (str, key) => {
 		return;
 	}
 
-	// All keys beyond this point are paired with the CTRL key
-	if (!key?.ctrl) return;
-	// BUG: I think the last active command is getting included in the buffer that is rendered for the layer
-	// It appears that when I rotate through the layers, I see the last command run in that layer, which is bad
-	if (key.name === "n") {
-		scene.cycleActiveLayer(-1);
-		render();
+	if (key?.ctrl) {
+		// BUG: I think the last active command is getting included in the buffer that is rendered for the layer
+		// It appears that when I rotate through the layers, I see the last command run in that layer, which is bad
+		if (key.name === "n") {
+			scene.cycleActiveLayer(-1);
+			render();
+			return;
+		}
+		if (key.name === "p") {
+			scene.cycleActiveLayer(1);
+			render();
+		}
 		return;
 	}
-	if (key.name === "p") {
-		scene.cycleActiveLayer(1);
-		render();
+
+	if (pendingAction) return;
+	if (isColonMode()) return;
+	if (str === ":") return;
+	if (isPrintableAscii(str)) {
+		handleShortcut(str);
+		clearPromptInput();
 	}
 });
 
@@ -245,12 +263,23 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 // ---- input handling ----
 
 rl.on("line", line => {
-	if (pendingAction) {
-		pendingAction = null;
+	const trimmed = line.trim();
+	if (trimmed === "" || trimmed === ":") {
+		clearStatusMessages();
+		render();
+		return;
 	}
+
+	if (!trimmed.startsWith(":")) {
+		render();
+		return;
+	}
+
+	const commandLine = line.trimStart();
 	try {
 		recordCommandHistory(line);
-		runCommandLine(line);
+		pendingAction = null;
+		runCommandLine(commandLine);
 	} catch (err) {
 		showError(String(err));
 	}
@@ -261,6 +290,7 @@ rl.on("line", line => {
 function runCommandLine(line: string) {
 	const tokens = tokenize(line);
 	const ast = parseCommand(tokens, line);
+	const undoEntry = ast.type === "command" ? createUndoEntry(ast) : null;
 	const result = execute(scene, ast);
 
 	if (result.type === "save") {
@@ -270,6 +300,9 @@ function runCommandLine(line: string) {
 
 	if (result.type === "load") {
 		loadCompactDoc(result.filename);
+		if (undoEntry && shouldRecordUndo(result)) {
+			recordUndoEntry(undoEntry);
+		}
 		return;
 	}
 
@@ -284,6 +317,9 @@ function runCommandLine(line: string) {
 	}
 
 	if (result.type === "quit") shutdown();
+	if (undoEntry && shouldRecordUndo(result)) {
+		recordUndoEntry(undoEntry);
+	}
 }
 
 function saveCompactDoc(filename: string) {
@@ -313,6 +349,12 @@ function loadCompactDoc(filename: string) {
 
 function showError(msg: string) {
 	errorMessage = msg;
+}
+
+function clearStatusMessages() {
+	errorMessage = null;
+	warningMessage = null;
+	infoMessage = null;
 }
 
 function formatWarnings(
@@ -447,6 +489,10 @@ function clamp(n: number, min: number, max: number): number {
 	return Math.max(min, Math.min(max, n));
 }
 
+function isColonMode(): boolean {
+	return rl.line.trimStart().startsWith(":");
+}
+
 function shouldClearError(
 	str: string,
 	key?: { ctrl?: boolean; meta?: boolean; alt?: boolean; name?: string }
@@ -454,6 +500,44 @@ function shouldClearError(
 	if (key?.ctrl || key?.meta || key?.alt) return false;
 	if (key?.name === "backspace" || key?.name === "delete") return true;
 	return str.length === 1 && /[ -~]/.test(str);
+}
+
+function isPrintableAscii(value: string): boolean {
+	return value.length === 1 && /[ -~]/.test(value);
+}
+
+function handleShortcut(key: string) {
+	if (key === "u") {
+		undoLastCommand();
+	}
+}
+
+function undoLastCommand() {
+	const entry = undoStack.pop();
+	if (!entry) return;
+	commandStack.pop();
+	scene = Scene.fromDoc(entry.doc);
+	scene.activeLayerId = entry.activeLayerId;
+	pendingAction = null;
+	drag = null;
+	render();
+}
+
+function createUndoEntry(command: CommandAST): UndoEntry {
+	return {
+		command,
+		doc: scene.toDoc(),
+		activeLayerId: scene.activeLayerId,
+	};
+}
+
+function recordUndoEntry(entry: UndoEntry) {
+	undoStack.push(entry);
+	commandStack.push(entry.command);
+}
+
+function shouldRecordUndo(result: ExecResult): boolean {
+	return result.type === "render" || result.type === "load";
 }
 
 function recordCommandHistory(line: string) {
@@ -489,6 +573,10 @@ function stepCommandHistory(delta: -1 | 1) {
 function replacePromptInput(text: string) {
 	rl.write(null, { ctrl: true, name: "u" });
 	rl.write(text);
+}
+
+function clearPromptInput() {
+	replacePromptInput("");
 }
 
 function handlePendingAction(
