@@ -35,8 +35,8 @@ export function execute(
 					layerId,
 					constraints: {
 						withinFrame: true,
-						minW: 80,
-						minH: 40,
+						minW: 4,
+						minH: 8,
 					},
 					cancelKey: "Escape",
 				},
