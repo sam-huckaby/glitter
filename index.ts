@@ -42,9 +42,6 @@ let scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
 
 const mouse = createMouseInput();
 
-// ---- readline MUST exist before render() ----
-
-
 const rl = readline.createInterface({
 	input: mouse.input,
 	output: process.stdout,
@@ -132,42 +129,52 @@ scene.addLayer("components");
 // ---- rendering ----
 
 function render() {
+	// Preview overlay, so that we can show the gray box when the user
+	// adds a new component with the mouse
 	const overlay: OverlayRect | undefined = pendingAction?.previewRect
 		? { rect: pendingAction.previewRect }
 		: undefined;
+
+	// Draw the scene onto the terminal
 	canvas.draw(scene.render(overlay));
 
-	// move cursor to command row
+	// move cursor to command row (the bottom of the terminal)
 	process.stdout.write(`\x1b[${COMMAND_ROW};1H`);
 	process.stdout.write("\x1b[0K");
 
+	// --------------------------------------------------------
+	// User messaging
+	// --------------------------------------------------------
 	if (errorMessage) {
-		process.stdout.write("\x1b[41m"); // red bg
+		process.stdout.write("\x1b[41m"); // red background
 		process.stdout.write(
-			errorMessage.slice(0, process.stdout.columns)
+			errorMessage.slice(0, process.stdout.columns) // clip the message if it's too long
 		);
-		process.stdout.write("\x1b[0m");
+		process.stdout.write("\x1b[0m"); // reset colors
 		return;
 	}
 	if (warningMessage) {
-		process.stdout.write("\x1b[43m\x1b[30m"); // yellow bg + black text
+		process.stdout.write("\x1b[43m\x1b[30m"); // yellow background + black text
 		process.stdout.write(
 			warningMessage.slice(0, process.stdout.columns)
 		);
-		process.stdout.write("\x1b[0m");
+		process.stdout.write("\x1b[0m"); // reset colors
 		return;
 	}
 	if (infoMessage) {
-		process.stdout.write("\x1b[42m\x1b[30m"); // green bg + black text
+		process.stdout.write("\x1b[42m\x1b[30m"); // green background + black text
 		process.stdout.write(
 			infoMessage.slice(0, process.stdout.columns)
 		);
-		process.stdout.write("\x1b[0m");
+		process.stdout.write("\x1b[0m"); // reset colors
 		return;
 	}
 
+	// Find the active layer and grab its name for display at the bottom
 	const activeLayer = scene.layers.find(l => l.id === scene.activeLayerId);
 	const layerName = activeLayer?.name ?? "none";
+
+	// Update the prompt based on whether we're in a pendingAction
 	if (pendingAction) {
 		rl.setPrompt(
 			`${LAYER_COLOR}[${layerName}]${COLOR_RESET} $ :add box (drag to place, Esc to cancel)`

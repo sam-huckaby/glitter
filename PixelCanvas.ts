@@ -11,6 +11,11 @@ export class PixelCanvas {
 		process.stdout.write("\x1b[0m");
 	}
 
+	/**
+	* Redraw the entire canvas by:
+	* 1. Clear the entire stdout buffer
+	* 2. Write a given buffer to stdout
+	*/
 	draw(buffer: string) {
 		// move cursor home and clear entire screen
 		process.stdout.write("\x1b[H\x1b[2J");
