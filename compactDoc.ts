@@ -1,16 +1,31 @@
 import { BoxComponentDoc, SceneDoc } from "./sceneDoc";
 
 export type CompactDoc = {
+	/** The schema version */
 	v: 1;
+	/** The width of the scene/image */
 	w: number;
+	/** The height of the scene/image */
 	h: number;
+	/** The canonical names of the layers */
 	layers: string[];
+	/** The components that are in the scene */
 	nodes: CompactNode[];
+	/** A description node to help convey meaning between users and agents */
 	meta?: Record<string, unknown>;
 };
 
+/** These are the currently and future supported node types */
 export type CompactNodeType = "box" | "text" | "image" | "button";
 
+/**
+* An entry in the nodes array for a scene. Shape:
+* - CompactNodeType - one of: "box", "text", "image", or "button"
+* - Name - any string
+* - Parent Layer - string (must exist in the top-level layers array)
+* - Dimensions - [ X, Y, Width, Height ]
+* - (optional) Meta - Record<string, unknown> that is used to convey meaning between users and agents at the node-level
+*/
 export type CompactNode = [
 	CompactNodeType | string,
 	string,

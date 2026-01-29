@@ -18,18 +18,50 @@ const server = new McpServer({
 });
 
 // TODO: This whole file needs to be read over and updated to fit this project
+const EXAMPLE_JSON_STRUCTURE = `
+{
+  "v": 1,
+  "w": 410,
+  "h": 228,
+  "layers": ["frame", "components"],
+  "nodes": [
+    ["box", "frameBox", "frame", [4, 8, 402, 212]],
+    ["box", "c1", "components", [45, 34, 65, 45]]
+  ]
+}
+`;
 
 /**
  * TOOL DEFINITION
  * This tool halts the AI, opens your local app, and returns the edits.
  */
 server.tool(
+	// The name of the tool
 	"review_and_edit_design",
+
+	// Give the agent a detailed description to help it understand how to use this tool
+	`Opens a local GUI for the user to visually edit the UI layout. 
+
+	IMPORTANT BEHAVIOR:
+	- This tool BLOCKS execution. The AI must wait until the user closes the window.
+	- The tool returns the *modified* JSON layout after the user is done.
+
+	DATA FORMAT:
+	- Use the 'Compact JSON' format.
+	- Coordinate system: (0,0) is top-left.
+	- Nodes are arrays: ["type", "id", "layer", [x, y, w, h]].
+
+	EXAMPLE INPUT:
+	${EXAMPLE_JSON_STRUCTURE}
+	`,
+
+	// The parameters required from the agent
 	{
 		initial_layout_json: z.string().describe("The compact JSON string of the layout to review"),
 	},
-	async ({ initial_layout_json }) => {
 
+	// The actual callback that the agent is invoking
+	async ({ initial_layout_json }) => {
 		// 1. Create a temporary file to exchange state
 		const tempDir = os.tmpdir();
 		const tempFilePath = path.join(tempDir, `design_draft_${Date.now()}.json`);
@@ -43,7 +75,7 @@ server.tool(
 			// We use 'npx ts-node' to run your TS script directly
 			console.error(`[MCP] Launching user interface...`);
 
-			const result = spawnSync("npx", ["ts-node", YOUR_CLI_PATH, tempFilePath], {
+			const result = spawnSync("bun", ["run", YOUR_CLI_PATH, tempFilePath], {
 				stdio: "inherit", // Pass stdin/out/err to the user so they see the app
 				shell: true       // Ensure compatibility across OS
 			});

@@ -5,7 +5,8 @@ import { asNumber, asString } from "./valueUtils";
 export type ExecResult =
 	| { type: "render" }
 	| { type: "quit" }
-	| { type: "save"; filename: string }
+	| { type: "save"; filename?: string }
+	| { type: "saveAndQuit"; filename?: string }
 	| { type: "load"; filename: string }
 	| { type: "info"; message: string }
 	| { type: "needsInteraction"; pendingAction: PendingAction }
@@ -49,14 +50,21 @@ export function execute(
 			return {
 				type: "info",
 				message:
-					"Commands: :w [filename] save (default scene.json), :e [filename] load, :q quit",
+					"Commands: :w [filename] save, :wq save and quit, :e [filename] load, :q quit",
 			};
 		}
 		case "w": {
 			const filename = cmd.args.length > 0
 				? asString(cmd.args[0], "filename")
-				: "scene.json";
+				: undefined;
 			return { type: "save", filename };
+		}
+
+		case "wq": {
+			const filename = cmd.args.length > 0
+				? asString(cmd.args[0], "filename")
+				: undefined;
+			return { type: "saveAndQuit", filename };
 		}
 
 		case "e": {

@@ -23,11 +23,14 @@ This tool can export and import an ultra-compact JSON format meant to be easy fo
 
 ### Commands
 
-- `:w [filename]` saves the current scene to a compact JSON file (default: `scene.json`).
+- `:w [filename]` saves the current scene. If no filename is provided, it uses the last opened/saved file (and errors if none).
 - `:e [filename]` loads a compact JSON file and replaces the current scene.
+- `:wq [filename]` saves and quits. If no filename is provided, it uses the last opened/saved file (and errors if none).
 - `:help` shows a brief command reference.
 
 Filenames can include dots or paths without quotes (e.g. `:w ./scene.json`).
+
+You can also load a file at startup with `bun index.ts path/to/design.json`. If the file is missing, the app exits with code `2`.
 
 ### Schema v1
 

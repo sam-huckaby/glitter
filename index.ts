@@ -39,6 +39,13 @@ const undoStack: UndoEntry[] = [];
 
 const canvas = new PixelCanvas();
 let scene = new Scene(TERM_WIDTH, DESIGN_HEIGHT);
+let currentFilename: string | null = null;
+
+const initialFilename = process.argv[2];
+if (initialFilename && !fs.existsSync(initialFilename)) {
+	console.error(`File not found: ${initialFilename}`);
+	process.exit(2);
+}
 
 const mouse = createMouseInput();
 
@@ -301,7 +308,23 @@ function runCommandLine(line: string) {
 	const result = execute(scene, ast);
 
 	if (result.type === "save") {
-		saveCompactDoc(result.filename);
+		const filename = resolveSaveFilename(result.filename);
+		if (!filename) {
+			showError("No filename specified. Use :w <filename> first.");
+			return;
+		}
+		saveCompactDoc(filename);
+		return;
+	}
+
+	if (result.type === "saveAndQuit") {
+		const filename = resolveSaveFilename(result.filename);
+		if (!filename) {
+			showError("No filename specified. Use :wq <filename> first.");
+			return;
+		}
+		saveCompactDoc(filename);
+		shutdown();
 		return;
 	}
 
@@ -332,6 +355,7 @@ function runCommandLine(line: string) {
 function saveCompactDoc(filename: string) {
 	const compact = compactFromSceneDoc(scene.toDoc());
 	fs.writeFileSync(filename, JSON.stringify(compact, null, 2), "utf8");
+	currentFilename = filename;
 	warningMessage = null;
 	infoMessage = `Saved ${filename}`;
 }
@@ -343,6 +367,7 @@ function loadCompactDoc(filename: string) {
 	scene = Scene.fromDoc(doc);
 	pendingAction = null;
 	drag = null;
+	currentFilename = filename;
 	if (warnings.length > 0) {
 		warningMessage = formatWarnings(warnings);
 		infoMessage = null;
@@ -385,6 +410,15 @@ function shutdown() {
 }
 
 // ---- initial draw ----
+if (initialFilename) {
+	try {
+		loadCompactDoc(initialFilename);
+	} catch (err) {
+		console.error(`Failed to load ${initialFilename}: ${String(err)}`);
+		process.exit(2);
+	}
+}
+
 mouse.enable();
 render();
 
@@ -584,6 +618,12 @@ function replacePromptInput(text: string) {
 
 function clearPromptInput() {
 	replacePromptInput("");
+}
+
+function resolveSaveFilename(explicit?: string): string | null {
+	if (explicit && explicit.trim().length > 0) return explicit;
+	if (currentFilename) return currentFilename;
+	return null;
 }
 
 function handlePendingAction(

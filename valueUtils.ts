@@ -1,5 +1,8 @@
 import { Value } from "./ast";
 
+// Wait, am I supposed to use Effect.ts for all this?
+// The below seems kinda silly now...
+
 export function asString(
 	v: Value | undefined,
 	name = "value"
