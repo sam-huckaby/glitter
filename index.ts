@@ -661,6 +661,9 @@ function handleShortcut(key: string) {
 	if (key === "u") {
 		undoLastCommand();
 	}
+	if (key === "x") {
+		deleteSelectedComponent();
+	}
 }
 
 function undoLastCommand() {
@@ -675,6 +678,31 @@ function undoLastCommand() {
 	metaEdit = null;
 	metaEditError = false;
 	showCursor(false);
+	render();
+}
+
+function deleteSelectedComponent() {
+	if (!selectedComponentId) {
+		showError("No selected component. Click a component in the active layer first.");
+		render();
+		return;
+	}
+	const comp = scene.getComponentById(selectedComponentId);
+	if (!comp || comp.layerId !== scene.activeLayerId) {
+		showError("No selected component in the active layer.");
+		render();
+		return;
+	}
+	const undoEntry = createUndoEntry({
+		type: "command",
+		name: "delete",
+		args: [],
+		namedArgs: {},
+		raw: "x",
+	});
+	scene.removeComponent(comp.id);
+	recordUndoEntry(undoEntry);
+	clearSelection();
 	render();
 }
 

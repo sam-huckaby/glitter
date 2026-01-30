@@ -23,10 +23,27 @@ This tool can export and import an ultra-compact JSON format meant to be easy fo
 
 ### Commands
 
+Commands starting with `:`
 - `:w [filename]` saves the current scene. If no filename is provided, it uses the last opened/saved file (and errors if none).
 - `:e [filename]` loads a compact JSON file and replaces the current scene.
 - `:wq [filename]` saves and quits. If no filename is provided, it uses the last opened/saved file (and errors if none).
 - `:help` shows a brief command reference.
+- `:add box x=<px> y=<px> w=<px> h=<px>` adds a box component to the active layer.
+- `:add image x=<px> y=<px> w=<px> h=<px>` adds an image component to the active layer.
+- `:add box` or `:add image` enters mouse drag mode to place the component.
+- `:layer add <name>` creates a new layer and makes it active.
+- `:layer select <name>` switches the active layer.
+- `:meta` edits the selected component metadata (active layer only).
+
+Commands that require a selection
+- `:meta` opens the JSON metadata editor for the selected component in the active layer.
+- `x` deletes the selected component in the active layer.
+
+Single-key shortcuts
+- `u` undo the last command that modified the scene.
+- `x` delete the selected component in the active layer (undoable with `u`).
+
+Selections are scoped to the active layer; switching layers clears the current selection.
 
 Filenames can include dots or paths without quotes (e.g. `:w ./scene.json`).
 

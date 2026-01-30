@@ -193,6 +193,12 @@ export class Scene {
 		comp.meta = meta;
 	}
 
+	removeComponent(id: string): void {
+		const index = this.doc.components.findIndex(comp => comp.id === id);
+		if (index === -1) throw new Error(`Component "${id}" not found`);
+		this.doc.components.splice(index, 1);
+	}
+
 	private nextComponentId(): string {
 		const id = `c${this.doc.state.nextId}`;
 		this.doc.state.nextId++;
