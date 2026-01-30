@@ -68,7 +68,7 @@ export function parseCommand(
 
 	if (
 		name === "add" &&
-		args[0]?.value === "box" &&
+		(args[0]?.value === "box" || args[0]?.value === "image") &&
 		Object.keys(namedArgs).length === 0
 	) {
 		return {

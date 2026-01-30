@@ -13,7 +13,7 @@ export type ExecResult =
 	| { type: "none" };
 
 export type PendingAction = {
-	kind: "createBoxDrag";
+	kind: "createBoxDrag" | "createImageDrag";
 	layerId: string;
 	startedAt?: { px: number; py: number };
 	previewRect?: { x: number; y: number; w: number; h: number };
@@ -33,6 +33,23 @@ export function execute(
 				type: "needsInteraction",
 				pendingAction: {
 					kind: "createBoxDrag",
+					layerId,
+					constraints: {
+						withinFrame: true,
+						minW: 4,
+						minH: 8,
+					},
+					cancelKey: "Escape",
+				},
+			};
+		}
+		if (cmd.name === "add" && cmd.args[0]?.value === "image") {
+			const layerId = scene.activeLayerId;
+			if (!layerId) throw new Error("No active layer");
+			return {
+				type: "needsInteraction",
+				pendingAction: {
+					kind: "createImageDrag",
 					layerId,
 					constraints: {
 						withinFrame: true,
@@ -94,6 +111,18 @@ export function execute(
 			if (cmd.args[0]?.value === "box") {
 				const n = cmd.namedArgs;
 				scene.addBox({
+					rect: {
+						x: asNumber(n.x, "x"),
+						y: asNumber(n.y, "y"),
+						w: asNumber(n.w, "w"),
+						h: asNumber(n.h, "h"),
+					},
+				});
+				return { type: "render" };
+			}
+			if (cmd.args[0]?.value === "image") {
+				const n = cmd.namedArgs;
+				scene.addImage({
 					rect: {
 						x: asNumber(n.x, "x"),
 						y: asNumber(n.y, "y"),

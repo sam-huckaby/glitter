@@ -1,27 +1,3 @@
-export type SceneDoc = {
-	schemaVersion: 1;
-	units: "px";
-	size: {
-		widthCells: number;
-		heightCells: number;
-	};
-	layers: LayerDoc[];
-	components: ComponentDoc[];
-	state: {
-		nextId: number;
-	};
-	meta?: Record<string, unknown>;
-};
-
-export type LayerDoc = {
-	// ids are the human-facing names (stable, git-friendly)
-	id: string;
-	name: string;
-	visible: boolean;
-};
-
-export type ComponentDoc = BoxComponentDoc;
-
 export type Rect = {
 	x: number;
 	y: number;
@@ -39,6 +15,42 @@ export type BoxComponentDoc = {
 		locked?: boolean;
 		[key: string]: unknown;
 	};
+};
+
+export type ImageComponentDoc = {
+	id: string;
+	type: "image";
+	layerId: string;
+	rect: Rect;
+	meta?: {
+		name?: string;
+		locked?: boolean;
+		[key: string]: unknown;
+	};
+};
+
+export type ComponentDoc = BoxComponentDoc | ImageComponentDoc;
+
+export type LayerDoc = {
+	// ids are the human-facing names (stable, git-friendly)
+	id: string;
+	name: string;
+	visible: boolean;
+};
+
+export type SceneDoc = {
+	schemaVersion: 1;
+	units: "px";
+	size: {
+		widthCells: number;
+		heightCells: number;
+	};
+	layers: LayerDoc[];
+	components: ComponentDoc[];
+	state: {
+		nextId: number;
+	};
+	meta?: Record<string, unknown>;
 };
 
 export function validateSceneDoc(doc: SceneDoc): void {
@@ -69,6 +81,11 @@ export function validateSceneDoc(doc: SceneDoc): void {
 			throw new Error(`Duplicate component id: "${comp.id}"`);
 		}
 		componentIds.add(comp.id);
+
+		const compType = (comp as { type?: string }).type;
+		if (compType !== "box" && compType !== "image") {
+			throw new Error(`Unsupported component type: "${String(compType)}"`);
+		}
 
 		if (!layerIds.has(comp.layerId)) {
 			throw new Error(

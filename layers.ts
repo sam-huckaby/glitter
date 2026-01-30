@@ -5,6 +5,7 @@ import {
 	LayerDoc,
 	ComponentDoc,
 	BoxComponentDoc,
+	ImageComponentDoc,
 	Rect,
 	validateSceneDoc,
 } from "./sceneDoc";
@@ -137,6 +138,72 @@ export class Scene {
 		id?: string;
 		meta?: BoxComponentDoc["meta"];
 	}): BoxComponentDoc {
+		const { layerId, rect, id } = this.validateNewComponent(opts);
+		const meta = opts.meta ?? { description: "" };
+
+		const comp: BoxComponentDoc = {
+			id,
+			type: "box",
+			layerId,
+			rect,
+			meta,
+		};
+
+		this.doc.components.push(comp);
+		return comp;
+	}
+
+	addImage(opts: {
+		layerId?: string;
+		rect: Rect;
+		id?: string;
+		meta?: ImageComponentDoc["meta"];
+	}): ImageComponentDoc {
+		const { layerId, rect, id } = this.validateNewComponent(opts);
+		const meta = opts.meta ?? { description: "" };
+
+		const comp: ImageComponentDoc = {
+			id,
+			type: "image",
+			layerId,
+			rect,
+			meta,
+		};
+
+		this.doc.components.push(comp);
+		return comp;
+	}
+
+	getComponentById(id: string): ComponentDoc | undefined {
+		return this.doc.components.find(c => c.id === id);
+	}
+
+	updateComponentRect(id: string, rect: Rect): void {
+		const comp = this.getComponentById(id);
+		if (!comp) throw new Error(`Component "${id}" not found`);
+		comp.rect = { ...rect };
+	}
+
+	updateComponentMeta(id: string, meta: Record<string, unknown> | undefined): void {
+		const comp = this.getComponentById(id);
+		if (!comp) throw new Error(`Component "${id}" not found`);
+		if (meta && typeof meta !== "object") {
+			throw new Error(`Component "${id}" meta must be an object`);
+		}
+		comp.meta = meta;
+	}
+
+	private nextComponentId(): string {
+		const id = `c${this.doc.state.nextId}`;
+		this.doc.state.nextId++;
+		return id;
+	}
+
+	private validateNewComponent(opts: {
+		layerId?: string;
+		rect: Rect;
+		id?: string;
+	}): { layerId: string; rect: Rect; id: string } {
 		const layerId = opts.layerId ?? this.activeLayerId;
 		if (!layerId) throw new Error("No active layer");
 		if (!this.doc.layers.some(l => l.id === layerId)) {
@@ -155,7 +222,7 @@ export class Scene {
 			maxY > this.heightPx
 		) {
 			throw new Error(
-				`cannot create box outside of the canvas. Canvas height: ${this.heightPx}, canvas width: ${this.widthPx}`
+				`cannot create component outside of the canvas. Canvas height: ${this.heightPx}, canvas width: ${this.widthPx}`
 			);
 		}
 
@@ -164,33 +231,7 @@ export class Scene {
 			throw new Error(`Component "${id}" already exists`);
 		}
 
-		const comp: BoxComponentDoc = {
-			id,
-			type: "box",
-			layerId,
-			rect: { ...opts.rect },
-			meta: opts.meta,
-		};
-
-		this.doc.components.push(comp);
-		return comp;
-	}
-
-	getComponentById(id: string): ComponentDoc | undefined {
-		return this.doc.components.find(c => c.id === id);
-	}
-
-	updateBoxRect(id: string, rect: Rect): void {
-		const comp = this.getComponentById(id);
-		if (!comp) throw new Error(`Component "${id}" not found`);
-		if (comp.type !== "box") throw new Error(`Component "${id}" is not a box`);
-		comp.rect = { ...rect };
-	}
-
-	private nextComponentId(): string {
-		const id = `c${this.doc.state.nextId}`;
-		this.doc.state.nextId++;
-		return id;
+		return { layerId, rect: { ...opts.rect }, id };
 	}
 
 	// ─────────────────────────
@@ -231,6 +272,14 @@ export class Scene {
 		}
 	}
 
+	fillRect(x: number, y: number, w: number, h: number) {
+		for (let py = y; py < y + h; py++) {
+			for (let px = x; px < x + w; px++) {
+				this.setPixel(px, py);
+			}
+		}
+	}
+
 	// ─────────────────────────
 	// Rendering
 	// ─────────────────────────
@@ -241,14 +290,16 @@ export class Scene {
 	* and then a final "overlay" layer can be applied on top of the final composite
 	* which has its components drawn in gray for things like mouse actions.
 	*/
-	render(overlay?: OverlayRect): string {
+	render(overlay?: OverlayRect, selectedComponentId?: string | null): string {
 		// Configure all the colors up-front
 		const colorActive = "\x1b[38;5;208m"; // Orange
+		const colorSelected = "\x1b[38;5;46m"; // Green
 		const colorOverlay = overlay?.color ?? "\x1b[38;5;245m"; // Gray
 		const colorReset = "\x1b[0m"; // Colorless
 
 		// toggles which are used to track how to display individual groups of pixels
 		let colorOn = false;
+		let selectedOn = false;
 		let overlayOn = false;
 
 		// clear runtime buffers
@@ -264,11 +315,11 @@ export class Scene {
 		// Store the currently active layer, since we're going to loop through them all
 		// and want to return to where the user was (so as not to confuse them)
 		const prevActive = this.activeLayerId;
+		const selectedBuffer = selectedComponentId
+			? new Uint8Array(this.widthCells * this.heightCells)
+			: null;
 		// Loop through layers and rasterize components
 		for (const comp of this.doc.components) {
-			// Temporarily ignore non-box components (until we implement them)
-			// TODO: Implement other components (button, image, text)
-			if (comp.type !== "box") continue;
 
 			// Figure out which layer this component is in
 			const runtimeLayer = this.layers.find(l => l.id === comp.layerId);
@@ -280,12 +331,44 @@ export class Scene {
 			// Change to the layer that the component belongs to
 			this.activeLayerId = runtimeLayer.id;
 			// then draw the component onto the layer's buffer
-			this.drawBox(
-				comp.rect.x,
-				comp.rect.y,
-				comp.rect.w,
-				comp.rect.h
-			);
+			if (comp.type === "box") {
+				this.drawBox(
+					comp.rect.x,
+					comp.rect.y,
+					comp.rect.w,
+					comp.rect.h
+				);
+				if (selectedBuffer && comp.id === selectedComponentId) {
+					drawBoxInBuffer(
+						selectedBuffer,
+						this.widthCells,
+						this.heightCells,
+						comp.rect.x,
+						comp.rect.y,
+						comp.rect.w,
+						comp.rect.h
+					);
+				}
+			}
+			if (comp.type === "image") {
+				this.fillRect(
+					comp.rect.x,
+					comp.rect.y,
+					comp.rect.w,
+					comp.rect.h
+				);
+				if (selectedBuffer && comp.id === selectedComponentId) {
+					fillRectInBuffer(
+						selectedBuffer,
+						this.widthCells,
+						this.heightCells,
+						comp.rect.x,
+						comp.rect.y,
+						comp.rect.w,
+						comp.rect.h
+					);
+				}
+			}
 		}
 		// Return the active layer to where it was, so we don't confuse the user
 		this.activeLayerId = prevActive;
@@ -342,6 +425,10 @@ export class Scene {
 				const overlayValue = overlayBuffer ? overlayBuffer[index] : 0;
 				// Whether to use the overlay color for the current pixel
 				const useOverlay = overlayValue !== 0;
+				// Whether to use the selected color for the current pixel
+				const useSelected = selectedBuffer
+					? selectedBuffer[index] !== 0
+					: false;
 				// Render the final composite and overlay's combined cell value
 				// (remember: this is braille dots, so a cell has 8 "pixels" in it)
 				const cellValue = final[index] | overlayValue;
@@ -357,6 +444,7 @@ export class Scene {
 						overlayOn = true;
 						// Don't display other colors
 						colorOn = false;
+						selectedOn = false;
 					}
 				} else {
 					// If the last pixel was part of an overlay, we need to update the color
@@ -365,15 +453,27 @@ export class Scene {
 						out += colorReset;
 						overlayOn = false;
 					}
-					// If this cell is part of an active shape and the color is not swapped yet
-					if (isActive && !colorOn) {
-						out += colorActive;
-						colorOn = true;
-					}
-					// If this cell is NOT part of an active shape, but the last cell was
-					if (!isActive && colorOn) {
-						out += colorReset;
+					if (useSelected) {
+						if (!selectedOn) {
+							out += colorSelected;
+							selectedOn = true;
+						}
 						colorOn = false;
+					} else {
+						if (selectedOn) {
+							out += colorReset;
+							selectedOn = false;
+						}
+						// If this cell is part of an active shape and the color is not swapped yet
+						if (isActive && !colorOn) {
+							out += colorActive;
+							colorOn = true;
+						}
+						// If this cell is NOT part of an active shape, but the last cell was
+						if (!isActive && colorOn) {
+							out += colorReset;
+							colorOn = false;
+						}
 					}
 				}
 
@@ -382,10 +482,11 @@ export class Scene {
 			}
 			// If any colors are still active, close them out so that we don't
 			// paint the rest of the output funny colors
-			if (overlayOn || colorOn) {
+			if (overlayOn || colorOn || selectedOn) {
 				out += colorReset;
 				colorOn = false;
 				overlayOn = false;
+				selectedOn = false;
 			}
 			// Remember: buffers are ONE-dimensional, so we need to add our own line breaks
 			out += "\n";
@@ -432,6 +533,42 @@ function drawDashedRect(
 	for (let y = yStart; y <= yEnd; y += step) {
 		setPixelInBuffer(buffer, widthCells, heightCells, xStart, y);
 		setPixelInBuffer(buffer, widthCells, heightCells, xEnd, y);
+	}
+}
+
+function drawBoxInBuffer(
+	buffer: Uint8Array,
+	widthCells: number,
+	heightCells: number,
+	x: number,
+	y: number,
+	w: number,
+	h: number
+): void {
+	for (let i = x; i < x + w; i++) {
+		setPixelInBuffer(buffer, widthCells, heightCells, i, y);
+		setPixelInBuffer(buffer, widthCells, heightCells, i, y + h - 1);
+	}
+
+	for (let j = y; j < y + h; j++) {
+		setPixelInBuffer(buffer, widthCells, heightCells, x, j);
+		setPixelInBuffer(buffer, widthCells, heightCells, x + w - 1, j);
+	}
+}
+
+function fillRectInBuffer(
+	buffer: Uint8Array,
+	widthCells: number,
+	heightCells: number,
+	x: number,
+	y: number,
+	w: number,
+	h: number
+): void {
+	for (let py = y; py < y + h; py++) {
+		for (let px = x; px < x + w; px++) {
+			setPixelInBuffer(buffer, widthCells, heightCells, px, py);
+		}
 	}
 }
 

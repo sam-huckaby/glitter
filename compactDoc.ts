@@ -1,4 +1,4 @@
-import { BoxComponentDoc, SceneDoc } from "./sceneDoc";
+import { BoxComponentDoc, ImageComponentDoc, SceneDoc } from "./sceneDoc";
 
 export type CompactDoc = {
 	/** The schema version */
@@ -53,11 +53,11 @@ export function compactFromSceneDoc(doc: SceneDoc): CompactDoc {
 
 	const nodes: CompactNode[] = [];
 	for (const comp of doc.components) {
-		if (comp.type !== "box") continue;
+		if (comp.type !== "box" && comp.type !== "image") continue;
 		const meta = comp.meta as Record<string, unknown> | undefined;
 		const node: CompactNode = meta && Object.keys(meta).length > 0
-			? ["box", comp.id, comp.layerId, rectToArray(comp.rect), meta]
-			: ["box", comp.id, comp.layerId, rectToArray(comp.rect)];
+			? [comp.type, comp.id, comp.layerId, rectToArray(comp.rect), meta]
+			: [comp.type, comp.id, comp.layerId, rectToArray(comp.rect)];
 		nodes.push(node);
 	}
 
@@ -92,7 +92,7 @@ export function sceneDocFromCompact(doc: CompactDoc): {
 	}));
 
 	const warnings: CompactWarning[] = [];
-	const components: BoxComponentDoc[] = [];
+	const components: Array<BoxComponentDoc | ImageComponentDoc> = [];
 	const componentIds = new Set<string>();
 
 	for (const node of doc.nodes) {
@@ -106,7 +106,7 @@ export function sceneDocFromCompact(doc: CompactDoc): {
 			continue;
 		}
 
-		if (type !== "box") {
+		if (type !== "box" && type !== "image") {
 			warnings.push({
 				type: "unsupportedNode",
 				nodeType: String(type),
@@ -118,7 +118,7 @@ export function sceneDocFromCompact(doc: CompactDoc): {
 		componentIds.add(id);
 		components.push({
 			id,
-			type: "box",
+			type,
 			layerId,
 			rect: arrayToRect(rectArray),
 			meta,

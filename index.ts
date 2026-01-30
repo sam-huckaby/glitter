@@ -26,6 +26,18 @@ let errorMessage: string | null = null;
 let warningMessage: string | null = null;
 let infoMessage: string | null = null;
 let pendingAction: PendingAction | null = null;
+let selectedComponentId: string | null = null;
+let selectionPoint: { x: number; y: number } | null = null;
+let selectionStack: string[] = [];
+let selectionIndex = 0;
+let metaEdit:
+	| {
+		componentId: string;
+		original: Record<string, unknown> | undefined;
+		buffer: string;
+	}
+	| null = null;
+let metaEditError = false;
 const commandHistory: string[] = [];
 let historyIndex = 0;
 let historyDraft: string | null = null;
@@ -66,10 +78,20 @@ mouse.input.on("keypress", (str, key) => {
 		render();
 		return;
 	}
+	if (metaEdit && key?.name === "escape") {
+		metaEdit = null;
+		metaEditError = false;
+		errorMessage = null;
+		showCursor(false);
+		render();
+		return;
+	}
 	if (errorMessage && shouldClearError(str, key)) {
 		errorMessage = null;
 		render();
-		return;
+		if (!metaEdit) {
+			return;
+		}
 	}
 	if (warningMessage && shouldClearError(str, key)) {
 		warningMessage = null;
@@ -82,10 +104,12 @@ mouse.input.on("keypress", (str, key) => {
 		return;
 	}
 	if (key?.name === "up" && !key?.ctrl) {
+		if (metaEdit) return;
 		stepCommandHistory(-1);
 		return;
 	}
 	if (key?.name === "down" && !key?.ctrl) {
+		if (metaEdit) return;
 		stepCommandHistory(1);
 		return;
 	}
@@ -95,17 +119,20 @@ mouse.input.on("keypress", (str, key) => {
 		// It appears that when I rotate through the layers, I see the last command run in that layer, which is bad
 		if (key.name === "n") {
 			scene.cycleActiveLayer(-1);
+			clearSelection();
 			render();
 			return;
 		}
 		if (key.name === "p") {
 			scene.cycleActiveLayer(1);
+			clearSelection();
 			render();
 		}
 		return;
 	}
 
 	if (pendingAction) return;
+	if (metaEdit) return;
 	if (isColonMode()) return;
 	if (str === ":") return;
 	if (isPrintableAscii(str)) {
@@ -143,7 +170,7 @@ function render() {
 		: undefined;
 
 	// Draw the scene onto the terminal
-	canvas.draw(scene.render(overlay));
+	canvas.draw(scene.render(overlay, selectedComponentId));
 
 	// move cursor to command row (the bottom of the terminal)
 	process.stdout.write(`\x1b[${COMMAND_ROW};1H`);
@@ -183,14 +210,23 @@ function render() {
 
 	// Update the prompt based on whether we're in a pendingAction
 	if (pendingAction) {
+		const componentLabel = pendingAction.kind === "createImageDrag"
+			? "image"
+			: "box";
 		rl.setPrompt(
-			`${LAYER_COLOR}[${layerName}]${COLOR_RESET} $ :add box (drag to place, Esc to cancel)`
+			`${LAYER_COLOR}[${layerName}]${COLOR_RESET} $ :add ${componentLabel} (drag to place, Esc to cancel)`
 		);
+	} else if (metaEdit) {
+		rl.setPrompt(`${LAYER_COLOR}[${layerName}]${COLOR_RESET} $ :meta `);
 	} else {
 		rl.setPrompt(`${LAYER_COLOR}[${layerName}]${COLOR_RESET} $ `);
 	}
 
 	rl.prompt(true);
+	if (metaEdit) {
+		replacePromptInput(metaEdit.buffer);
+		showCursor(true);
+	}
 }
 
 // ---- mouse resize interaction ----
@@ -232,7 +268,36 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 		if (ev.button !== 0) return;
 
 		const hit = hitTestTopmostBoxEdge(scene, mousePx.x, mousePx.y, EDGE_THRESHOLD_PX);
-		if (!hit) return;
+		if (!hit) {
+			if (!isPointInCanvas(mousePx)) return;
+			const stack = hitTestComponentStack(scene, mousePx.x, mousePx.y);
+			if (stack.length === 0) {
+				clearSelection();
+				render();
+				return;
+			}
+
+			const samePoint =
+				selectionPoint &&
+				selectionPoint.x === mousePx.x &&
+				selectionPoint.y === mousePx.y;
+			const sameStack =
+				samePoint &&
+				stack.length === selectionStack.length &&
+				stack.every((id, index) => id === selectionStack[index]);
+
+			if (!sameStack) {
+				selectionIndex = 0;
+			} else {
+				selectionIndex = (selectionIndex + 1) % stack.length;
+			}
+
+			selectionPoint = { x: mousePx.x, y: mousePx.y };
+			selectionStack = stack;
+			selectedComponentId = stack[selectionIndex] ?? null;
+			render();
+			return;
+		}
 
 		drag = {
 			componentId: hit.componentId,
@@ -269,7 +334,7 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 			}
 		);
 
-		scene.updateBoxRect(drag.componentId, next);
+		scene.updateComponentRect(drag.componentId, next);
 		render();
 	}
 });
@@ -277,6 +342,16 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 // ---- input handling ----
 
 rl.on("line", line => {
+	if (metaEdit && metaEditError && errorMessage) {
+		errorMessage = null;
+		metaEditError = false;
+		render();
+		return;
+	}
+	if (metaEdit) {
+		handleMetaEditSubmit(line);
+		return;
+	}
 	const trimmed = line.trim();
 	if (trimmed === "" || trimmed === ":") {
 		clearStatusMessages();
@@ -304,6 +379,10 @@ rl.on("line", line => {
 function runCommandLine(line: string) {
 	const tokens = tokenize(line);
 	const ast = parseCommand(tokens, line);
+	if (ast.type === "command" && ast.name === "meta") {
+		openMetaEditor();
+		return;
+	}
 	const undoEntry = ast.type === "command" ? createUndoEntry(ast) : null;
 	const result = execute(scene, ast);
 
@@ -367,6 +446,10 @@ function loadCompactDoc(filename: string) {
 	scene = Scene.fromDoc(doc);
 	pendingAction = null;
 	drag = null;
+	clearSelection();
+	metaEdit = null;
+	metaEditError = false;
+	showCursor(false);
 	currentFilename = filename;
 	if (warnings.length > 0) {
 		warningMessage = formatWarnings(warnings);
@@ -432,7 +515,7 @@ function hitTestTopmostBoxEdge(
 ): { componentId: string; edge: Edge; rect: { x: number; y: number; w: number; h: number } } | null {
 	for (let i = scene.doc.components.length - 1; i >= 0; i--) {
 		const comp = scene.doc.components[i];
-		if (comp.type !== "box") continue;
+		if (comp.type !== "box" && comp.type !== "image") continue;
 		if (comp.meta?.locked) continue;
 		if (comp.layerId !== scene.activeLayerId) continue;
 
@@ -441,6 +524,32 @@ function hitTestTopmostBoxEdge(
 		return { componentId: comp.id, edge, rect: comp.rect };
 	}
 	return null;
+}
+
+function hitTestComponentStack(scene: Scene, px: number, py: number): string[] {
+	const hits: Array<{ id: string; area: number; index: number }> = [];
+	for (let i = 0; i < scene.doc.components.length; i++) {
+		const comp = scene.doc.components[i];
+		if (comp.type !== "box" && comp.type !== "image") continue;
+		if (comp.layerId !== scene.activeLayerId) continue;
+
+		const rect = comp.rect;
+		const within =
+			px >= rect.x &&
+			py >= rect.y &&
+			px < rect.x + rect.w &&
+			py < rect.y + rect.h;
+		if (!within) continue;
+		const area = rect.w * rect.h;
+		hits.push({ id: comp.id, area, index: i });
+	}
+
+	hits.sort((a, b) => {
+		if (b.area !== a.area) return b.area - a.area;
+		return a.index - b.index;
+	});
+
+	return hits.map(hit => hit.id);
 }
 
 function hitTestBoxEdge(
@@ -538,6 +647,7 @@ function shouldClearError(
 	str: string,
 	key?: { ctrl?: boolean; meta?: boolean; alt?: boolean; name?: string }
 ): boolean {
+	if (!str) return false;
 	if (key?.ctrl || key?.meta || key?.alt) return false;
 	if (key?.name === "backspace" || key?.name === "delete") return true;
 	return str.length === 1 && /[ -~]/.test(str);
@@ -561,6 +671,10 @@ function undoLastCommand() {
 	scene.activeLayerId = entry.activeLayerId;
 	pendingAction = null;
 	drag = null;
+	clearSelection();
+	metaEdit = null;
+	metaEditError = false;
+	showCursor(false);
 	render();
 }
 
@@ -631,7 +745,10 @@ function handlePendingAction(
 	mousePx: { x: number; y: number }
 ): boolean {
 	if (!pendingAction) return false;
-	if (pendingAction.kind !== "createBoxDrag") return false;
+	if (
+		pendingAction.kind !== "createBoxDrag" &&
+		pendingAction.kind !== "createImageDrag"
+	) return false;
 	const constraints = pendingAction.constraints ?? {
 		withinFrame: true,
 		minW: 80,
@@ -670,7 +787,10 @@ function handlePendingAction(
 			constraints.minW,
 			constraints.minH
 		);
-		const command = `:add box x=${rect.x} y=${rect.y} w=${rect.w} h=${rect.h}`;
+		const componentType = pendingAction.kind === "createImageDrag"
+			? "image"
+			: "box";
+		const command = `:add ${componentType} x=${rect.x} y=${rect.y} w=${rect.w} h=${rect.h}`;
 		pendingAction = null;
 		try {
 			runCommandLine(command);
@@ -682,6 +802,81 @@ function handlePendingAction(
 	}
 
 	return true;
+}
+
+function openMetaEditor() {
+	if (!selectedComponentId) {
+		showError("No selected component. Click a component in the active layer first.");
+		return;
+	}
+	const comp = scene.getComponentById(selectedComponentId);
+	if (!comp || comp.layerId !== scene.activeLayerId) {
+		showError("No selected component in the active layer.");
+		return;
+	}
+	const meta = comp.meta ?? { description: "" };
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+		showError("Selected component metadata is not a JSON object.");
+		return;
+	}
+	metaEdit = {
+		componentId: comp.id,
+		original: meta,
+		buffer: JSON.stringify(meta),
+	};
+	pendingAction = null;
+	metaEditError = false;
+	showCursor(true);
+	clearStatusMessages();
+	render();
+}
+
+function handleMetaEditSubmit(line: string) {
+	if (!metaEdit) return;
+	const buffer = line.trim();
+	metaEdit.buffer = buffer;
+	try {
+		const parsed = JSON.parse(buffer);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			metaEditError = true;
+			showError(
+				"Invalid JSON. Enter an object or press Esc to cancel and keep previous metadata."
+			);
+			render();
+			return;
+		}
+		const undoEntry = createUndoEntry({
+			type: "command",
+			name: "meta",
+			args: [],
+			namedArgs: {},
+			raw: ":meta",
+		});
+		scene.updateComponentMeta(metaEdit.componentId, parsed as Record<string, unknown>);
+		recordUndoEntry(undoEntry);
+		metaEdit = null;
+		metaEditError = false;
+		showCursor(false);
+		clearStatusMessages();
+		render();
+	} catch (err) {
+		metaEditError = true;
+		showError(
+			"Invalid JSON. Enter an object or press Esc to cancel and keep previous metadata."
+		);
+		render();
+	}
+}
+
+function clearSelection() {
+	selectedComponentId = null;
+	selectionPoint = null;
+	selectionStack = [];
+	selectionIndex = 0;
+}
+
+function showCursor(visible: boolean) {
+	process.stdout.write(visible ? "\x1b[?25h" : "\x1b[?25l");
 }
 
 function normalizeRect(
