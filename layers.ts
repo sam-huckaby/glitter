@@ -200,9 +200,18 @@ export class Scene {
 	}
 
 	private nextComponentId(): string {
-		const id = `c${this.doc.state.nextId}`;
-		this.doc.state.nextId++;
-		return id;
+		let maxId = 0;
+		for (const comp of this.doc.components) {
+			const match = /^c(\d+)$/.exec(comp.id);
+			if (!match) continue;
+			const value = Number.parseInt(match[1], 10);
+			if (Number.isFinite(value) && value > maxId) {
+				maxId = value;
+			}
+		}
+		const nextId = maxId + 1;
+		this.doc.state.nextId = nextId + 1;
+		return `c${nextId}`;
 	}
 
 	private validateNewComponent(opts: {

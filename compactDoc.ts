@@ -234,11 +234,16 @@ function validateRectArray(rect: unknown): void {
 }
 
 function nextComponentId(ids: Set<string>): number {
-	let nextId = 1;
-	while (ids.has(`c${nextId}`)) {
-		nextId++;
+	let maxId = 0;
+	for (const id of ids) {
+		const match = /^c(\d+)$/.exec(id);
+		if (!match) continue;
+		const value = Number.parseInt(match[1], 10);
+		if (Number.isFinite(value) && value > maxId) {
+			maxId = value;
+		}
 	}
-	return nextId;
+	return maxId + 1;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

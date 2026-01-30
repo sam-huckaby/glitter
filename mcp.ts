@@ -4,12 +4,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import os from "os";
 
 // CONFIGURATION
+// Get the directory of the current file
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // Path to your existing design CLI script
-const YOUR_CLI_PATH = path.resolve("./index.ts");
+const YOUR_CLI_PATH = path.join(__dirname, "index.ts");
 
 // Create the server instance
 const server = new McpServer({
@@ -75,7 +80,7 @@ server.tool(
 			// We use 'npx ts-node' to run your TS script directly
 			console.error(`[MCP] Launching user interface...`);
 
-			const result = spawnSync("bun", ["run", YOUR_CLI_PATH, tempFilePath], {
+			const result = spawnSync("bun", [YOUR_CLI_PATH, tempFilePath], {
 				stdio: "inherit", // Pass stdin/out/err to the user so they see the app
 				shell: true       // Ensure compatibility across OS
 			});

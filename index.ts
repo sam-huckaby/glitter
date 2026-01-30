@@ -232,12 +232,20 @@ function render() {
 // ---- mouse resize interaction ----
 
 type Edge = "n" | "s" | "e" | "w";
-type DragState = {
+type ResizeDragState = {
+	kind: "resize";
 	componentId: string;
 	edge: Edge;
 	startMousePx: { x: number; y: number };
 	startRect: { x: number; y: number; w: number; h: number };
 };
+type MoveDragState = {
+	kind: "move";
+	componentId: string;
+	startMousePx: { x: number; y: number };
+	startRect: { x: number; y: number; w: number; h: number };
+};
+type DragState = ResizeDragState | MoveDragState;
 
 const EDGE_THRESHOLD_PX = 2;
 const MIN_W_PX = 2;
@@ -269,6 +277,23 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 
 		const hit = hitTestTopmostBoxEdge(scene, mousePx.x, mousePx.y, EDGE_THRESHOLD_PX);
 		if (!hit) {
+			const selectedComp = selectedComponentId
+				? scene.getComponentById(selectedComponentId)
+				: undefined;
+			if (
+				selectedComp &&
+				selectedComp.layerId === scene.activeLayerId &&
+				!selectedComp.meta?.locked &&
+				isPointInRect(mousePx, selectedComp.rect)
+			) {
+				drag = {
+					kind: "move",
+					componentId: selectedComp.id,
+					startMousePx: mousePx,
+					startRect: { ...selectedComp.rect },
+				};
+				return;
+			}
 			if (!isPointInCanvas(mousePx)) return;
 			const stack = hitTestComponentStack(scene, mousePx.x, mousePx.y);
 			if (stack.length === 0) {
@@ -300,6 +325,7 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 		}
 
 		drag = {
+			kind: "resize",
 			componentId: hit.componentId,
 			edge: hit.edge,
 			startMousePx: mousePx,
@@ -321,20 +347,34 @@ mouse.events.on("mouse", (ev: MouseEvent) => {
 
 		const dx = mousePx.x - drag.startMousePx.x;
 		const dy = mousePx.y - drag.startMousePx.y;
-		const next = resizeRect(
-			drag.startRect,
-			drag.edge,
-			dx,
-			dy,
-			{
-				minW: MIN_W_PX,
-				minH: MIN_H_PX,
-				maxW: scene.widthPx,
-				maxH: scene.heightPx,
-			}
-		);
+		if (drag.kind === "resize") {
+			const next = resizeRect(
+				drag.startRect,
+				drag.edge,
+				dx,
+				dy,
+				{
+					minW: MIN_W_PX,
+					minH: MIN_H_PX,
+					maxW: scene.widthPx,
+					maxH: scene.heightPx,
+				}
+			);
 
-		scene.updateComponentRect(drag.componentId, next);
+			scene.updateComponentRect(drag.componentId, next);
+		} else {
+			const next = clampMoveRect(
+				{
+					x: drag.startRect.x + dx,
+					y: drag.startRect.y + dy,
+					w: drag.startRect.w,
+					h: drag.startRect.h,
+				},
+				scene.widthPx,
+				scene.heightPx
+			);
+			scene.updateComponentRect(drag.componentId, next);
+		}
 		render();
 	}
 });
@@ -939,6 +979,33 @@ function clampRectToCanvas(rect: { x: number; y: number; w: number; h: number })
 	w = Math.max(1, w);
 	h = Math.max(1, h);
 	return { x, y, w, h };
+}
+
+function clampMoveRect(
+	rect: { x: number; y: number; w: number; h: number },
+	maxW: number,
+	maxH: number
+): { x: number; y: number; w: number; h: number } {
+	const maxX = Math.max(0, maxW - rect.w);
+	const maxY = Math.max(0, maxH - rect.h);
+	return {
+		x: clamp(rect.x, 0, maxX),
+		y: clamp(rect.y, 0, maxY),
+		w: rect.w,
+		h: rect.h,
+	};
+}
+
+function isPointInRect(
+	point: { x: number; y: number },
+	rect: { x: number; y: number; w: number; h: number }
+): boolean {
+	return (
+		point.x >= rect.x &&
+		point.y >= rect.y &&
+		point.x < rect.x + rect.w &&
+		point.y < rect.y + rect.h
+	);
 }
 
 function finalizeCreateRect(
